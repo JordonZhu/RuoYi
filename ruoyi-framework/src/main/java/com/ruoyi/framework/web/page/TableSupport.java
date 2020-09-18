@@ -2,7 +2,7 @@ package com.ruoyi.framework.web.page;
 
 import com.ruoyi.common.constant.Constants;
 import com.ruoyi.common.page.PageDomain;
-import com.ruoyi.framework.util.ServletUtils;
+import com.ruoyi.common.utils.ServletUtils;
 
 /**
  * 表格数据处理
@@ -10,6 +10,11 @@ import com.ruoyi.framework.util.ServletUtils;
  * @author ruoyi
  */
 public class TableSupport {
+
+    private TableSupport() {
+        throw new IllegalStateException("Utility class");
+    }
+
     /**
      * 封装分页对象
      */

@@ -1,27 +1,23 @@
 package com.ruoyi.web.controller.monitor;
 
-import java.util.List;
-
-import com.ruoyi.common.utils.StringUtils;
-import org.apache.shiro.authz.annotation.RequiresPermissions;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Controller;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.ResponseBody;
+import cn.hutool.core.util.StrUtil;
 import com.ruoyi.common.annotation.Log;
 import com.ruoyi.common.base.AjaxResult;
 import com.ruoyi.common.enums.BusinessType;
 import com.ruoyi.common.enums.OnlineStatus;
+import com.ruoyi.common.page.TableDataInfo;
 import com.ruoyi.framework.shiro.session.OnlineSession;
 import com.ruoyi.framework.shiro.session.OnlineSessionDAO;
 import com.ruoyi.framework.util.ShiroUtils;
-import com.ruoyi.common.page.TableDataInfo;
-import com.ruoyi.system.domain.SysUserOnline;
-import com.ruoyi.system.service.impl.SysUserOnlineServiceImpl;
 import com.ruoyi.framework.web.base.BaseController;
+import com.ruoyi.system.domain.SysUserOnline;
+import com.ruoyi.system.service.ISysUserOnlineService;
+import org.apache.shiro.authz.annotation.RequiresPermissions;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 /**
  * 在线用户监控
@@ -32,12 +28,12 @@ import com.ruoyi.framework.web.base.BaseController;
 @RequestMapping("/monitor/online")
 public class SysUserOnlineController extends BaseController {
 
-    private final SysUserOnlineServiceImpl userOnlineService;
+    private final ISysUserOnlineService userOnlineService;
 
     private final OnlineSessionDAO onlineSessionDAO;
 
     @Autowired
-    public SysUserOnlineController(SysUserOnlineServiceImpl userOnlineService, OnlineSessionDAO onlineSessionDAO) {
+    public SysUserOnlineController(ISysUserOnlineService userOnlineService, OnlineSessionDAO onlineSessionDAO) {
         this.userOnlineService = userOnlineService;
         this.onlineSessionDAO = onlineSessionDAO;
     }
@@ -65,7 +61,7 @@ public class SysUserOnlineController extends BaseController {
     public AjaxResult batchForceLogout(@RequestParam("ids[]") String[] ids) {
         for (String sessionId : ids) {
             String message = logout(sessionId);
-            if (StringUtils.isNotEmpty(message)) {
+            if (StrUtil.isNotEmpty(message)) {
                 return error(message);
             }
         }
@@ -78,7 +74,7 @@ public class SysUserOnlineController extends BaseController {
     @ResponseBody
     public AjaxResult forceLogout(String sessionId) {
         String message = logout(sessionId);
-        if (StringUtils.isNotEmpty(message)) {
+        if (StrUtil.isNotEmpty(message)) {
             return error(message);
         }
         return success();
@@ -96,8 +92,8 @@ public class SysUserOnlineController extends BaseController {
         if (onlineSession == null) {
             return "用户已下线";
         }
-        onlineSession.setStatus(OnlineStatus.off_line);
-        online.setStatus(OnlineStatus.off_line);
+        onlineSession.setStatus(OnlineStatus.OFF_LINE);
+        online.setStatus(OnlineStatus.OFF_LINE);
         userOnlineService.saveOnline(online);
         return null;
     }

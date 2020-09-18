@@ -1,29 +1,24 @@
 package com.ruoyi.web.controller.system;
 
-import org.apache.shiro.crypto.hash.Md5Hash;
+import cn.hutool.core.util.StrUtil;
+import com.ruoyi.common.annotation.Log;
+import com.ruoyi.common.annotation.LoginAuth;
+import com.ruoyi.common.base.AjaxResult;
+import com.ruoyi.common.config.Global;
+import com.ruoyi.common.enums.BusinessType;
+import com.ruoyi.framework.shiro.service.SysPasswordService;
+import com.ruoyi.common.utils.file.FileUploadUtils;
+import com.ruoyi.framework.util.ShiroUtils;
+import com.ruoyi.framework.web.base.BaseController;
+import com.ruoyi.system.domain.SysUser;
+import com.ruoyi.system.service.ISysUserService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.ModelMap;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.ResponseBody;
+import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
-import com.ruoyi.common.annotation.Log;
-import com.ruoyi.common.base.AjaxResult;
-import com.ruoyi.common.config.Global;
-import com.ruoyi.common.enums.BusinessType;
-import com.ruoyi.framework.shiro.service.SysPasswordService;
-import com.ruoyi.framework.util.FileUploadUtils;
-import com.ruoyi.framework.util.ShiroUtils;
-import com.ruoyi.system.domain.SysUser;
-import com.ruoyi.system.service.ISysDictDataService;
-import com.ruoyi.system.service.ISysUserService;
-import com.ruoyi.framework.web.base.BaseController;
 
 /**
  * 个人信息 业务处理
@@ -32,6 +27,7 @@ import com.ruoyi.framework.web.base.BaseController;
  */
 @Controller
 @RequestMapping("/system/user/profile")
+@LoginAuth
 public class SysProfileController extends BaseController {
     private static final Logger log = LoggerFactory.getLogger(SysProfileController.class);
 
@@ -41,22 +37,18 @@ public class SysProfileController extends BaseController {
 
     private final SysPasswordService passwordService;
 
-    private final ISysDictDataService dictDataService;
 
     @Autowired
-    public SysProfileController(ISysUserService userService, SysPasswordService passwordService, ISysDictDataService dictDataService) {
+    public SysProfileController(ISysUserService userService, SysPasswordService passwordService) {
         this.userService = userService;
         this.passwordService = passwordService;
-        this.dictDataService = dictDataService;
     }
 
     /**
      * 个人信息
      */
     @GetMapping()
-    public String profile(ModelMap mmap) {
-        SysUser user = getSysUser();
-        user.setSex(dictDataService.selectDictLabel("sys_user_sex", user.getSex()));
+    public String profile(ModelMap mmap,SysUser user) {
         mmap.put("user", user);
         mmap.put("roleGroup", userService.selectUserRoleGroup(user.getUserId()));
         mmap.put("postGroup", userService.selectUserPostGroup(user.getUserId()));
@@ -65,47 +57,47 @@ public class SysProfileController extends BaseController {
 
     @GetMapping("/checkPassword")
     @ResponseBody
-    public boolean checkPassword(String password) {
-        SysUser user = getSysUser();
-        String encrypt = new Md5Hash(user.getLoginName() + password + user.getSalt()).toHex();
-        return user.getPassword().equals(encrypt);
+    public boolean checkPassword(String password,SysUser user) {
+        return passwordService.matches(user, password);
     }
 
-    @GetMapping("/resetPwd/{userId}")
-    public String resetPwd(@PathVariable("userId") Long userId, ModelMap mmap) {
-        mmap.put("user", userService.selectUserById(userId));
+    @GetMapping("/resetPwd")
+    public String resetPwd(SysUser user, ModelMap mmap) {
+        mmap.put("user", userService.selectUserById(user.getUserId()));
         return prefix + "/resetPwd";
     }
 
     @Log(title = "重置密码", businessType = BusinessType.UPDATE)
     @PostMapping("/resetPwd")
     @ResponseBody
-    public AjaxResult resetPwd(SysUser user) {
-        user.setSalt(ShiroUtils.randomSalt());
-        user.setPassword(passwordService.encryptPassword(user.getLoginName(), user.getPassword(), user.getSalt()));
-        int rows = userService.resetUserPwd(user);
-        if (rows > 0) {
-            setSysUser(userService.selectUserById(user.getUserId()));
-            return success();
+    public AjaxResult resetPwd(String oldPassword, String newPassword, SysUser user) {
+        if(StrUtil.isNotEmpty(newPassword) && passwordService.matches(user, oldPassword)){
+            user.setSalt(ShiroUtils.randomSalt());
+            user.setPassword(passwordService.encryptPassword(user.getLoginName(), newPassword, user.getSalt()));
+            if (userService.resetUserPwd(user) > 0) {
+                setSysUser(userService.selectUserById(user.getUserId()));
+                return success();
+            }
+            return error();
         }
-        return error();
+        return error("修改密码失败，旧密码错误");
     }
 
     /**
      * 修改用户
      */
     @GetMapping("/edit/{userId}")
-    public String edit(@PathVariable("userId") Long userId, ModelMap mmap) {
-        mmap.put("user", userService.selectUserById(userId));
+    public String edit(SysUser user, ModelMap mmap) {
+        mmap.put("user", userService.selectUserById(user.getUserId()));
         return prefix + "/edit";
     }
 
     /**
      * 修改头像
      */
-    @GetMapping("/avatar/{userId}")
-    public String avatar(@PathVariable("userId") Long userId, ModelMap mmap) {
-        mmap.put("user", userService.selectUserById(userId));
+    @GetMapping("/avatar")
+    public String avatar(SysUser user, ModelMap mmap) {
+        mmap.put("user", userService.selectUserById(user.getUserId()));
         return prefix + "/avatar";
     }
 

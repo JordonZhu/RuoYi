@@ -2,7 +2,7 @@ package com.ruoyi.framework.aspectj;
 
 import com.ruoyi.common.annotation.DataSource;
 import com.ruoyi.framework.datasource.DynamicDataSourceContextHolder;
-import org.apache.commons.lang3.ObjectUtils;
+import cn.hutool.core.util.ObjectUtil;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
@@ -28,7 +28,7 @@ public class DataSourceAspect {
 
     @Pointcut("@annotation(com.ruoyi.common.annotation.DataSource)")
     public void dsPointCut() {
-
+        //配置织入点
     }
 
     @Around("dsPointCut()")
@@ -39,15 +39,15 @@ public class DataSourceAspect {
 
         DataSource dataSource = method.getAnnotation(DataSource.class);
 
-        if (ObjectUtils.allNotNull(dataSource)) {
-            DynamicDataSourceContextHolder.setDateSoureType(dataSource.value().name());
+        if (ObjectUtil.isNotNull(dataSource)) {
+            DynamicDataSourceContextHolder.setDataSourceType(dataSource.value().name());
         }
 
         try {
             return point.proceed();
         } finally {
             // 销毁数据源 在执行方法之后
-            DynamicDataSourceContextHolder.clearDateSoureType();
+            DynamicDataSourceContextHolder.clearDataSourceType();
         }
     }
 }

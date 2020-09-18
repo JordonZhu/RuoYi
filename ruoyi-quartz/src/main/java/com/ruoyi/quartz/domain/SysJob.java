@@ -1,9 +1,9 @@
 package com.ruoyi.quartz.domain;
 
+import cn.hutool.core.util.StrUtil;
 import com.ruoyi.common.annotation.Excel;
 import com.ruoyi.common.base.BaseEntity;
 import com.ruoyi.common.constant.ScheduleConstants;
-import com.ruoyi.common.utils.StringUtils;
 import com.ruoyi.quartz.util.CronUtils;
 import io.swagger.annotations.ApiModel;
 import io.swagger.annotations.ApiModelProperty;
@@ -11,7 +11,6 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 import springfox.documentation.annotations.ApiIgnore;
 
-import java.io.Serializable;
 import java.util.Date;
 
 /**
@@ -53,6 +52,10 @@ public class SysJob extends BaseEntity{
     @ApiModelProperty(value="cron计划策略",name="misfirePolicy",example="0")
     private String misfirePolicy = ScheduleConstants.MISFIRE_DEFAULT;
 
+    @Excel(name = "是否并发执行" , readConverterExp = "0=允许,1=禁止")
+    @ApiModelProperty(value="是否并发执行",name="status",example="0",allowableValues = "0,1",reference="0=允许,1=禁止")
+    private String concurrent;
+
     @Excel(name = "任务状态" , readConverterExp = "0=正常,1=暂停")
     @ApiModelProperty(value="任务状态",name="status",example="0",allowableValues = "0,1",reference="0=正常,1=暂停")
     private String status;
@@ -63,7 +66,7 @@ public class SysJob extends BaseEntity{
      */
     @ApiIgnore(value = "下次执行时间")
     public Date getNextValidTime(){
-        if (StringUtils.isNotEmpty(cronExpression)){
+        if (StrUtil.isNotEmpty(cronExpression)){
             return CronUtils.getNextExecution(cronExpression);
         }
         return null;

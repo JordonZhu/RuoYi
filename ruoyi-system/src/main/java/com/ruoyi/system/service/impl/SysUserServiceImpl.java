@@ -1,14 +1,18 @@
 package com.ruoyi.system.service.impl;
 
+import cn.hutool.core.convert.Convert;
+import cn.hutool.core.util.ObjectUtil;
+import cn.hutool.core.util.StrUtil;
 import com.ruoyi.common.annotation.DataScope;
 import com.ruoyi.common.constant.UserConstants;
 import com.ruoyi.common.exception.BusinessException;
-import com.ruoyi.common.support.Convert;
-import com.ruoyi.common.utils.StringUtils;
+import com.ruoyi.common.utils.security.Md5Utils;
 import com.ruoyi.system.domain.*;
 import com.ruoyi.system.mapper.*;
+import com.ruoyi.system.service.ISysConfigService;
 import com.ruoyi.system.service.ISysUserService;
-import org.apache.commons.lang3.ObjectUtils;
+import lombok.extern.slf4j.Slf4j;
+import cn.hutool.core.util.ObjectUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
@@ -22,6 +26,7 @@ import java.util.List;
  * @author ruoyi
  */
 @Service
+@Slf4j
 public class SysUserServiceImpl implements ISysUserService {
 
     private final SysUserMapper userMapper;
@@ -34,18 +39,21 @@ public class SysUserServiceImpl implements ISysUserService {
 
     private final SysUserRoleMapper userRoleMapper;
 
+    private final ISysConfigService configService;
+
     @Autowired
     public SysUserServiceImpl(SysUserMapper userMapper, SysRoleMapper roleMapper, SysPostMapper postMapper,
-                              SysUserPostMapper userPostMapper, SysUserRoleMapper userRoleMapper) {
+                              SysUserPostMapper userPostMapper, SysUserRoleMapper userRoleMapper, ISysConfigService configService) {
         this.userMapper = userMapper;
         this.roleMapper = roleMapper;
         this.postMapper = postMapper;
         this.userPostMapper = userPostMapper;
         this.userRoleMapper = userRoleMapper;
+        this.configService = configService;
     }
 
     /**
-     * 根据条件分页查询用户对象
+     * 根据条件分页查询用户列表
      *
      * @param user 用户信息
      * @return 用户信息集合信息
@@ -54,6 +62,30 @@ public class SysUserServiceImpl implements ISysUserService {
     @DataScope(tableAlias = "u")
     public List<SysUser> selectUserList(SysUser user) {
         return userMapper.selectUserList(user);
+    }
+
+    /**
+     * 根据条件分页查询已分配用户角色列表
+     *
+     * @param user 用户信息
+     * @return 用户信息集合信息
+     */
+    @Override
+    @DataScope(tableAlias = "u")
+    public List<SysUser> selectAllocatedList(SysUser user) {
+        return userMapper.selectAllocatedList(user);
+    }
+
+    /**
+     * 根据条件分页查询未分配用户角色列表
+     *
+     * @param user 用户信息
+     * @return 用户信息集合信息
+     */
+    @Override
+    @DataScope(tableAlias = "u")
+    public List<SysUser> selectUnallocatedList(SysUser user) {
+        return userMapper.selectUnallocatedList(user);
     }
 
     /**
@@ -122,7 +154,7 @@ public class SysUserServiceImpl implements ISysUserService {
      * @return 结果
      */
     @Override
-    public int deleteUserByIds(String ids){
+    public int deleteUserByIds(String ids) {
         Long[] userIds = Convert.toLongArray(ids);
         for (Long userId : userIds) {
             if (SysUser.isAdmin(userId)) {
@@ -253,7 +285,7 @@ public class SysUserServiceImpl implements ISysUserService {
     @Override
     public String checkPhoneUnique(SysUser user) {
         SysUser info = userMapper.checkPhoneUnique(user.getPhonenumber());
-        if (ObjectUtils.allNotNull(info) && !info.getUserId().equals(user.getUserId())) {
+        if (ObjectUtil.isNotNull(info) && !info.getUserId().equals(user.getUserId())) {
             return UserConstants.USER_PHONE_NOT_UNIQUE;
         }
         return UserConstants.USER_PHONE_UNIQUE;
@@ -268,7 +300,7 @@ public class SysUserServiceImpl implements ISysUserService {
     @Override
     public String checkEmailUnique(SysUser user) {
         SysUser info = userMapper.checkEmailUnique(user.getEmail());
-        if (ObjectUtils.allNotNull(info) && !info.getUserId().equals(user.getUserId())) {
+        if (ObjectUtil.isNotNull(info) && !info.getUserId().equals(user.getUserId())) {
             return UserConstants.USER_EMAIL_NOT_UNIQUE;
         }
         return UserConstants.USER_EMAIL_UNIQUE;
@@ -287,7 +319,7 @@ public class SysUserServiceImpl implements ISysUserService {
         for (SysRole role : list) {
             idsStr.append(role.getRoleName()).append(",");
         }
-        if (StringUtils.isNotEmpty(idsStr.toString())) {
+        if (StrUtil.isNotEmpty(idsStr.toString())) {
             return idsStr.substring(0, idsStr.length() - 1);
         }
         return idsStr.toString();
@@ -306,9 +338,79 @@ public class SysUserServiceImpl implements ISysUserService {
         for (SysPost post : list) {
             idsStr.append(post.getPostName()).append(",");
         }
-        if (StringUtils.isNotEmpty(idsStr.toString())) {
+        if (StrUtil.isNotEmpty(idsStr.toString())) {
             return idsStr.substring(0, idsStr.length() - 1);
         }
         return idsStr.toString();
+    }
+
+    /**
+     * 导入用户数据
+     *
+     * @param userList      导入的用户数据列表
+     * @param updateSupport 是否更新支持，如果已存在，则进行更新数据
+     * @param loginUser     操作用户
+     * @return 结果
+     */
+    @Override
+    public String importUser(List<SysUser> userList, Boolean updateSupport, SysUser loginUser) {
+        if (CollectionUtils.isEmpty(userList)) {
+            throw new BusinessException("导入用户数据不能为空！");
+        }
+        int successNum = 0;
+        int failureNum = 0;
+        final String br = "<br/>";
+        //当然操作用户
+        String operName = loginUser.getLoginName();
+        StringBuilder successMsg = new StringBuilder();
+        StringBuilder failureMsg = new StringBuilder();
+        String password = configService.selectConfigByKey("sys.user.initPassword");
+        for (SysUser user : userList) {
+            try {
+                // 验证是否存在这个用户
+                SysUser u = userMapper.selectUserByLoginName(user.getLoginName());
+                if (ObjectUtil.isNull(u)) {
+                    user.setPassword(Md5Utils.hash(user.getLoginName() + password));
+                    user.setCreateBy(operName);
+                    this.insertUser(user);
+                    successNum++;
+                    successMsg.append(br).append(successNum).append("、账号 ").append(user.getLoginName()).append(" 导入成功");
+                } else if (updateSupport) {
+                    user.setUpdateBy(operName);
+                    this.updateUser(user);
+                    successNum++;
+                    successMsg.append(br).append(successNum).append("、账号 ").append(user.getLoginName()).append(" 更新成功");
+                } else {
+                    failureNum++;
+                    failureMsg.append(br).append(failureNum).append("、账号 ").append(user.getLoginName()).append(" 已存在");
+                }
+            } catch (Exception e) {
+                failureNum++;
+                String msg = br + failureNum + "、账号 " + user.getLoginName() + " 导入失败：";
+                failureMsg.append(msg).append(e.getMessage());
+                log.error(msg, e);
+            }
+        }
+        if (failureNum > 0) {
+            failureMsg.insert(0, "很抱歉，导入失败！共 " + failureNum + " 条数据格式不正确，错误如下：");
+            throw new BusinessException(failureMsg.toString());
+        } else {
+            successMsg.insert(0, "恭喜您，数据已全部导入成功！共 " + successNum + " 条，数据如下：");
+        }
+        return successMsg.toString();
+    }
+
+    /**
+     * 修改用户状态
+     *
+     * @param user 用户
+     * @return 结果
+     */
+    @Override
+    public int changeStatus(SysUser user) {
+        if (SysUser.isAdmin(user.getUserId())) {
+            throw new BusinessException("不允许修改超级管理员用户");
+        }
+        return userMapper.updateUser(user);
     }
 }

@@ -3,11 +3,11 @@ package com.ruoyi.framework.web.base;
 import com.github.pagehelper.PageHelper;
 import com.github.pagehelper.PageInfo;
 import com.ruoyi.common.base.AjaxResult;
-import com.ruoyi.common.utils.DateUtils;
-import com.ruoyi.common.utils.StringUtils;
-import com.ruoyi.framework.util.ShiroUtils;
 import com.ruoyi.common.page.PageDomain;
 import com.ruoyi.common.page.TableDataInfo;
+import com.ruoyi.common.utils.DateUtil;
+import com.ruoyi.common.utils.sql.SqlUtil;
+import com.ruoyi.framework.util.ShiroUtils;
 import com.ruoyi.framework.web.page.TableSupport;
 import com.ruoyi.system.domain.SysUser;
 import org.apache.commons.lang3.ObjectUtils;
@@ -33,7 +33,7 @@ public class BaseController {
         binder.registerCustomEditor(Date.class, new PropertyEditorSupport() {
             @Override
             public void setAsText(String text) {
-                setValue(DateUtils.parseDate(text));
+                setValue(DateUtil.parseDate(text));
             }
         });
     }
@@ -46,7 +46,7 @@ public class BaseController {
         Integer pageNum = pageDomain.getPageNum();
         Integer pageSize = pageDomain.getPageSize();
         if (ObjectUtils.allNotNull(pageNum,pageSize)) {
-            String orderBy = pageDomain.getOrderBy();
+            String orderBy = SqlUtil.escapeOrderBySql(pageDomain.getOrderBy());
             PageHelper.startPage(pageNum, pageSize, orderBy);
         }
     }
@@ -115,15 +115,15 @@ public class BaseController {
     /**
      * 返回错误码消息
      */
-    public AjaxResult error(int code, String message) {
-        return AjaxResult.error(code, message);
+    public AjaxResult error(AjaxResult.Type type, String message) {
+        return new AjaxResult(type, message);
     }
 
     /**
      * 页面跳转
      */
     public String redirect(String url) {
-        return StringUtils.format("redirect:{}" , url);
+        return String.format("redirect:%s" , url);
     }
 
     public SysUser getSysUser() {

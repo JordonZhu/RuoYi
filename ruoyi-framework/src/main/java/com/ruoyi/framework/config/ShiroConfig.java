@@ -1,11 +1,22 @@
 package com.ruoyi.framework.config;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
-import javax.servlet.Filter;
-
+import at.pollux.thymeleaf.shiro.dialect.ShiroDialect;
+import cn.hutool.core.util.ObjectUtil;
+import com.ruoyi.framework.shiro.realm.UserRealm;
+import com.ruoyi.framework.shiro.session.OnlineSessionDAO;
+import com.ruoyi.framework.shiro.session.OnlineSessionFactory;
+import com.ruoyi.framework.shiro.web.filter.LogoutFilter;
+import com.ruoyi.framework.shiro.web.filter.captcha.CaptchaValidateFilter;
+import com.ruoyi.framework.shiro.web.filter.kickout.KickoutSessionFilter;
+import com.ruoyi.framework.shiro.web.filter.online.OnlineSessionFilter;
+import com.ruoyi.framework.shiro.web.filter.sync.SyncOnlineSessionFilter;
+import com.ruoyi.framework.shiro.web.session.OnlineWebSessionManager;
+import com.ruoyi.framework.shiro.web.session.SpringSessionValidationScheduler;
+import org.apache.commons.io.IOUtils;
 import org.apache.shiro.cache.ehcache.EhCacheManager;
 import org.apache.shiro.codec.Base64;
+import org.apache.shiro.config.ConfigurationException;
+import org.apache.shiro.io.ResourceUtils;
 import org.apache.shiro.mgt.SecurityManager;
 import org.apache.shiro.spring.security.interceptor.AuthorizationAttributeSourceAdvisor;
 import org.apache.shiro.spring.web.ShiroFilterFactoryBean;
@@ -16,17 +27,13 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import com.ruoyi.common.utils.StringUtils;
-import com.ruoyi.framework.shiro.realm.UserRealm;
-import com.ruoyi.framework.shiro.session.OnlineSessionDAO;
-import com.ruoyi.framework.shiro.session.OnlineSessionFactory;
-import com.ruoyi.framework.shiro.web.filter.LogoutFilter;
-import com.ruoyi.framework.shiro.web.filter.captcha.CaptchaValidateFilter;
-import com.ruoyi.framework.shiro.web.filter.online.OnlineSessionFilter;
-import com.ruoyi.framework.shiro.web.filter.sync.SyncOnlineSessionFilter;
-import com.ruoyi.framework.shiro.web.session.OnlineWebSessionManager;
-import com.ruoyi.framework.shiro.web.session.SpringSessionValidationScheduler;
-import at.pollux.thymeleaf.shiro.dialect.ShiroDialect;
+
+import javax.servlet.Filter;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * 权限配置加载
@@ -35,7 +42,6 @@ import at.pollux.thymeleaf.shiro.dialect.ShiroDialect;
  */
 @Configuration
 public class ShiroConfig {
-    public static final String PREMISSION_STRING = "perms[\"{0}\"]" ;
 
     /**
      * Session超时时间，单位为毫秒（默认30分钟）
@@ -48,6 +54,18 @@ public class ShiroConfig {
       */
     @Value("${shiro.session.validationInterval}")
     private int validationInterval;
+
+    /**
+     * 同一个用户最大会话数
+      */
+    @Value("${shiro.session.maxSession}")
+    private int maxSession;
+
+    /**
+     * 踢出之前登录的/之后登录的用户，默认踢出之前登录的用户
+     */
+    @Value("${shiro.session.kickoutAfter}")
+    private boolean kickoutAfter;
 
     /**
      * 验证码开关
@@ -104,12 +122,26 @@ public class ShiroConfig {
     public EhCacheManager getEhCacheManager() {
         net.sf.ehcache.CacheManager cacheManager = net.sf.ehcache.CacheManager.getCacheManager("ruoyi");
         EhCacheManager em = new EhCacheManager();
-        if (StringUtils.isNull(cacheManager)) {
-            em.setCacheManagerConfigFile("classpath:ehcache/ehcache-shiro.xml");
+        if (ObjectUtil.isNull(cacheManager)) {
+            em.setCacheManager(new net.sf.ehcache.CacheManager(getCacheManagerConfigFileInputStream()));
             return em;
         } else {
             em.setCacheManager(cacheManager);
             return em;
+        }
+    }
+
+    /**
+     * 返回配置文件流 避免ehcache配置文件一直被占用，无法完全销毁项目重新部署
+     */
+    private InputStream getCacheManagerConfigFileInputStream(){
+        String configFile = "classpath:ehcache/ehcache-shiro.xml";
+        try(InputStream inputStream = ResourceUtils.getInputStreamForPath(configFile)){
+            byte[] b = IOUtils.toByteArray(inputStream);
+            return new ByteArrayInputStream(b);
+        }catch (IOException e){
+            throw new ConfigurationException(
+                    "Unable to obtain input stream for cacheManagerConfigFile [" + configFile + "]", e);
         }
     }
 
@@ -218,6 +250,7 @@ public class ShiroConfig {
      */
     private LogoutFilter logoutFilter() {
         LogoutFilter logoutFilter = new LogoutFilter();
+        logoutFilter.setCacheManager(getEhCacheManager());
         logoutFilter.setLoginUrl(loginUrl);
         return logoutFilter;
     }
@@ -257,12 +290,13 @@ public class ShiroConfig {
         filters.put("onlineSession" , onlineSessionFilter());
         filters.put("syncOnlineSession" , syncOnlineSessionFilter());
         filters.put("captchaValidate" , captchaValidateFilter());
+        filters.put("kickout", kickoutSessionFilter());
         // 注销成功，则跳转到指定页面
         filters.put("logout" , logoutFilter());
         shiroFilterFactoryBean.setFilters(filters);
 
         // 所有请求需要认证
-        filterChainDefinitionMap.put("/**" , "user,onlineSession,syncOnlineSession");
+        filterChainDefinitionMap.put("/**" , "user,kickout,onlineSession,syncOnlineSession");
         shiroFilterFactoryBean.setFilterChainDefinitionMap(filterChainDefinitionMap);
 
         return shiroFilterFactoryBean;
@@ -336,5 +370,21 @@ public class ShiroConfig {
         AuthorizationAttributeSourceAdvisor authorizationAttributeSourceAdvisor = new AuthorizationAttributeSourceAdvisor();
         authorizationAttributeSourceAdvisor.setSecurityManager(securityManager);
         return authorizationAttributeSourceAdvisor;
+    }
+
+    /**
+     * 同一个用户多设备登录限制
+     */
+    private KickoutSessionFilter kickoutSessionFilter() {
+        KickoutSessionFilter kickoutSessionFilter = new KickoutSessionFilter();
+        kickoutSessionFilter.setCacheManager(getEhCacheManager());
+        kickoutSessionFilter.setSessionManager(sessionManager());
+        // 同一个用户最大的会话数，默认-1无限制；比如2的意思是同一个用户允许最多同时两个人登录
+        kickoutSessionFilter.setMaxSession(maxSession);
+        // 是否踢出后来登录的，默认是false；即后者登录的用户踢出前者登录的用户；踢出顺序
+        kickoutSessionFilter.setKickoutAfter(kickoutAfter);
+        // 被踢出后重定向到的地址；
+        kickoutSessionFilter.setKickoutUrl("/login?kickout=1");
+        return kickoutSessionFilter;
     }
 }

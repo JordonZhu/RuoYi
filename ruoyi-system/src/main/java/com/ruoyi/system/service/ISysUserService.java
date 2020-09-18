@@ -11,12 +11,28 @@ import com.ruoyi.system.domain.SysUser;
  */
 public interface ISysUserService {
     /**
-     * 根据条件分页查询用户对象
+     * 根据条件分页查询用户列表
      *
      * @param user 用户信息
      * @return 用户信息集合信息
      */
     List<SysUser> selectUserList(SysUser user);
+
+    /**
+     * 根据条件分页查询已分配用户角色列表
+     *
+     * @param user 用户信息
+     * @return 用户信息集合信息
+     */
+    List<SysUser> selectAllocatedList(SysUser user);
+
+    /**
+     * 根据条件分页查询未分配用户角色列表
+     *
+     * @param user 用户信息
+     * @return 用户信息集合信息
+     */
+    List<SysUser> selectUnallocatedList(SysUser user);
 
     /**
      * 通过用户名查询用户
@@ -138,4 +154,20 @@ public interface ISysUserService {
      * @return 结果
      */
     String selectUserPostGroup(Long userId);
+
+    /**
+     * 导入用户数据
+     * @param userList 导入的用户数据列表
+     * @param updateSupport 是否更新支持，如果已存在，则进行更新数据
+     * @param loginUser 操作用户
+     * @return 结果
+     */
+    String importUser(List<SysUser> userList, Boolean updateSupport, SysUser loginUser);
+
+    /**
+     * 修改用户状态
+     * @param user 用户
+     * @return 结果
+     */
+    int changeStatus(SysUser user);
 }

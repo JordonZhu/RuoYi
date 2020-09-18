@@ -1,21 +1,21 @@
 package com.ruoyi.system.service.impl;
 
+import cn.hutool.core.collection.CollectionUtil;
+import cn.hutool.core.util.ObjectUtil;
 import com.ruoyi.common.annotation.DataScope;
+import com.ruoyi.common.base.Ztree;
 import com.ruoyi.common.constant.UserConstants;
 import com.ruoyi.common.exception.BusinessException;
 import com.ruoyi.system.domain.SysDept;
 import com.ruoyi.system.domain.SysRole;
 import com.ruoyi.system.mapper.SysDeptMapper;
 import com.ruoyi.system.service.ISysDeptService;
-import org.apache.commons.lang3.ObjectUtils;
+import cn.hutool.core.util.ObjectUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.util.CollectionUtils;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 部门管理 服务实现
@@ -50,9 +50,9 @@ public class SysDeptServiceImpl implements ISysDeptService {
      */
     @Override
     @DataScope(tableAlias = "d")
-    public List<Map<String, Object>> selectDeptTree(SysDept dept) {
-        List<SysDept> deptList = selectDeptList(dept);
-        return getTrees(deptList, false, null);
+    public List<Ztree> selectDeptTree(SysDept dept) {
+        List<SysDept> deptList = deptMapper.selectDeptList(dept);
+        return initZtree(deptList);
     }
 
     /**
@@ -62,44 +62,55 @@ public class SysDeptServiceImpl implements ISysDeptService {
      * @return 部门列表（数据权限）
      */
     @Override
-    public List<Map<String, Object>> roleDeptTreeData(SysRole role) {
+    public List<Ztree> roleDeptTreeData(SysRole role) {
         Long roleId = role.getRoleId();
-        List<Map<String, Object>> trees;
+        List<Ztree> ztrees;
         List<SysDept> deptList = selectDeptList(new SysDept());
-        if (ObjectUtils.allNotNull(roleId)) {
+        if (ObjectUtil.isNotNull(roleId)) {
             List<String> roleDeptList = deptMapper.selectRoleDeptTree(roleId);
-            trees = getTrees(deptList, true, roleDeptList);
+            ztrees = initZtree(deptList, roleDeptList);
         } else {
-            trees = getTrees(deptList, false, null);
+            ztrees = initZtree(deptList);
         }
-        return trees;
+        return ztrees;
+    }
+
+    /**
+     * 对象转部门树
+     *
+     * @param deptList 部门列表
+     * @return 树结构列表
+     */
+    public List<Ztree> initZtree(List<SysDept> deptList){
+        return initZtree(deptList, null);
     }
 
     /**
      * 对象转部门树
      *
      * @param deptList     部门列表
-     * @param isCheck      是否需要选中
      * @param roleDeptList 角色已存在菜单列表
      * @return 部门树
      */
-    private List<Map<String, Object>> getTrees(List<SysDept> deptList, boolean isCheck, List<String> roleDeptList) {
-
-        List<Map<String, Object>> trees = new ArrayList<>();
-        deptList.stream().filter(sysDept -> UserConstants.DEPT_NORMAL.equals(sysDept.getStatus())).forEach(dept -> {
-            Map<String, Object> deptMap = new HashMap<>();
-            deptMap.put("id", dept.getDeptId());
-            deptMap.put("pId", dept.getParentId());
-            deptMap.put("name", dept.getDeptName());
-            deptMap.put("title", dept.getDeptName());
-            if (isCheck) {
-                deptMap.put("checked", roleDeptList.contains(dept.getDeptId() + dept.getDeptName()));
-            } else {
-                deptMap.put("checked", false);
-            }
-            trees.add(deptMap);
-        });
-        return trees;
+    private List<Ztree> initZtree(List<SysDept> deptList, List<String> roleDeptList) {
+        List<Ztree> ztrees = new ArrayList<>();
+        boolean isCheck = CollectionUtil.isNotEmpty(roleDeptList);
+        if(CollectionUtil.isNotEmpty(deptList)){
+            deptList.stream()
+                    .filter(dept-> UserConstants.DEPT_NORMAL.equals(dept.getStatus()))
+                    .forEach(dept->{
+                        Ztree ztree = new Ztree();
+                        ztree.setId(dept.getDeptId());
+                        ztree.setPId(dept.getParentId());
+                        ztree.setName(dept.getDeptName());
+                        ztree.setTitle(dept.getDeptName());
+                        if (isCheck){
+                            ztree.setChecked(roleDeptList.contains(dept.getDeptId() + dept.getDeptName()));
+                        }
+                        ztrees.add(ztree);
+            });
+        }
+        return ztrees;
     }
 
     /**
@@ -163,11 +174,13 @@ public class SysDeptServiceImpl implements ISysDeptService {
      */
     @Override
     public int updateDept(SysDept dept) {
-        SysDept info = deptMapper.selectDeptById(dept.getParentId());
-        if (ObjectUtils.allNotNull(info)) {
-            String ancestors = info.getAncestors() + "," + info.getDeptId();
-            dept.setAncestors(ancestors);
-            updateDeptChildren(dept, ancestors);
+        SysDept newParentDept = deptMapper.selectDeptById(dept.getParentId());
+        SysDept oldDept = selectDeptById(dept.getDeptId());
+        if (ObjectUtil.isNotNull(newParentDept) && ObjectUtil.isNotNull(oldDept)) {
+            String newAncestors = newParentDept.getAncestors() + "," + newParentDept.getDeptId();
+            String oldAncestors = oldDept.getAncestors();
+            dept.setAncestors(newAncestors);
+            updateDeptChildren(dept.getDeptId(), newAncestors, oldAncestors);
         }
         int result = deptMapper.updateDept(dept);
         if(UserConstants.DEPT_NORMAL.equals(dept.getStatus())){
@@ -191,25 +204,17 @@ public class SysDeptServiceImpl implements ISysDeptService {
     /**
      * 修改子元素关系
      *
-     * @param sysDept   部门
-     * @param ancestors 元素列表
+     * @param deptId   部门
+     * @param newAncestors 新的父ID集合
+     * @param oldAncestors 旧的父ID集合
      */
-    private void updateDeptChildren(SysDept sysDept, String ancestors) {
-        SysDept dept = new SysDept();
-        dept.setParentId(sysDept.getDeptId());
-        List<SysDept> childrens = deptMapper.selectDeptList(dept);
-        if (!CollectionUtils.isEmpty(childrens)) {
-            childrens.forEach(children -> {
-                children.setAncestors(ancestors + "," + dept.getParentId());
-                if (!UserConstants.DEPT_NORMAL.equals(sysDept.getStatus())) {
-                    children.setStatus(sysDept.getStatus());
-                }
-            });
-            deptMapper.updateDeptChildren(childrens);
-            childrens.stream().filter(children -> !UserConstants.DEPT_NORMAL.equals(children.getStatus()))
-                    .forEach(children ->
-                            updateDeptChildren(children, children.getAncestors())
-                    );
+    private void updateDeptChildren(Long deptId, String newAncestors, String oldAncestors) {
+        List<SysDept> children = deptMapper.selectChildrenDeptById(deptId);
+        for (SysDept child : children){
+            child.setAncestors(child.getAncestors().replace(oldAncestors,newAncestors));
+        }
+        if (CollectionUtil.isNotEmpty(children)){
+            deptMapper.updateDeptChildren(children);
         }
     }
 
@@ -233,7 +238,7 @@ public class SysDeptServiceImpl implements ISysDeptService {
     @Override
     public String checkDeptNameUnique(SysDept dept) {
         SysDept info = deptMapper.checkDeptNameUnique(dept.getDeptName(), dept.getParentId());
-        if (ObjectUtils.allNotNull(info) && !info.getDeptId().equals(dept.getDeptId())) {
+        if (ObjectUtil.isNotNull(info) && !info.getDeptId().equals(dept.getDeptId())) {
             return UserConstants.DEPT_NAME_NOT_UNIQUE;
         }
         return UserConstants.DEPT_NAME_UNIQUE;

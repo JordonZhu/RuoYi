@@ -1,14 +1,16 @@
 package com.ruoyi.system.service.impl;
 
+import cn.hutool.core.collection.CollectionUtil;
+import cn.hutool.core.util.ObjectUtil;
+import cn.hutool.core.util.StrUtil;
+import com.ruoyi.common.base.Ztree;
 import com.ruoyi.common.constant.UserConstants;
-import com.ruoyi.common.utils.StringUtils;
 import com.ruoyi.system.domain.SysMenu;
 import com.ruoyi.system.domain.SysRole;
 import com.ruoyi.system.domain.SysUser;
 import com.ruoyi.system.mapper.SysMenuMapper;
 import com.ruoyi.system.mapper.SysRoleMenuMapper;
 import com.ruoyi.system.service.ISysMenuService;
-import org.apache.commons.lang3.ObjectUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
@@ -57,21 +59,36 @@ public class SysMenuServiceImpl implements ISysMenuService {
     /**
      * 查询菜单集合
      *
+     * @param userId 用户ID
      * @return 所有菜单信息
      */
     @Override
-    public List<SysMenu> selectMenuList(SysMenu menu) {
-        return menuMapper.selectMenuList(menu);
+    public List<SysMenu> selectMenuList(SysMenu menu, Long userId) {
+        List<SysMenu> menuList;
+        if (SysUser.isAdmin(userId)){
+            menuList = menuMapper.selectMenuList(menu);
+        }else{
+            menu.getParams().put("userId", userId);
+            menuList = menuMapper.selectMenuListByUserId(menu);
+        }
+        return menuList;
     }
 
     /**
      * 查询菜单集合
      *
+     * @param userId 用户ID
      * @return 所有菜单信息
      */
     @Override
-    public List<SysMenu> selectMenuAll() {
-        return menuMapper.selectMenuAll();
+    public List<SysMenu> selectMenuAll(Long userId) {
+        List<SysMenu> menuList;
+        if (SysUser.isAdmin(userId)){
+            menuList = menuMapper.selectMenuAll();
+        }else{
+            menuList = menuMapper.selectMenuAllByUserId(userId);
+        }
+        return menuList;
     }
 
     /**
@@ -84,7 +101,7 @@ public class SysMenuServiceImpl implements ISysMenuService {
     public Set<String> selectPermsByUserId(Long userId) {
         List<String> perms = menuMapper.selectPermsByUserId(userId);
         Set<String> permsSet = new HashSet<>();
-        perms.stream().filter(StringUtils::isNotEmpty).forEach(perm -> permsSet.addAll(Arrays.asList(perm.trim().split(","))));
+        perms.stream().filter(StrUtil::isNotEmpty).forEach(perm -> permsSet.addAll(Arrays.asList(perm.trim().split(","))));
         return permsSet;
     }
 
@@ -92,42 +109,56 @@ public class SysMenuServiceImpl implements ISysMenuService {
      * 根据角色ID查询菜单
      *
      * @param role 角色对象
+     * @param userId 用户ID
      * @return 菜单列表
      */
     @Override
-    public List<Map<String, Object>> roleMenuTreeData(SysRole role) {
+    public List<Ztree> roleMenuTreeData(SysRole role, Long userId) {
         Long roleId = role.getRoleId();
-        List<Map<String, Object>> trees;
-        List<SysMenu> menuList = menuMapper.selectMenuAll();
-        if (ObjectUtils.allNotNull(roleId)) {
+        List<Ztree> ztrees;
+        List<SysMenu> menuList = selectMenuAll(userId);
+        if (ObjectUtil.isNotNull(roleId)) {
             List<String> roleMenuList = menuMapper.selectMenuTree(roleId);
-            trees = getTrees(menuList, true, roleMenuList, true);
+            ztrees = initZtree(menuList, roleMenuList, true);
         } else {
-            trees = getTrees(menuList, false, null, true);
+            ztrees = initZtree(menuList, null, true);
         }
-        return trees;
+        return ztrees;
     }
 
     /**
      * 查询所有菜单
      *
+     * @param userId 用户ID
      * @return 菜单列表
      */
     @Override
-    public List<Map<String, Object>> menuTreeData() {
-        List<SysMenu> menuList = menuMapper.selectMenuAll();
-        return getTrees(menuList, false, null, false);
+    public List<Ztree> menuTreeData(Long userId) {
+        List<SysMenu> menuList = selectMenuAll(userId);
+        return initZtree(menuList);
+    }
+
+    /**
+     * 对象转菜单树
+     *
+     * @param menuList 菜单列表
+     * @return 树结构列表
+     */
+    private List<Ztree> initZtree(List<SysMenu> menuList)
+    {
+        return initZtree(menuList, null, false);
     }
 
     /**
      * 查询系统所有权限
      *
+     * @param userId 用户ID
      * @return 权限列表
      */
     @Override
-    public Map<String, String> selectPermsAll() {
+    public Map<String, String> selectPermsAll(Long userId) {
         LinkedHashMap<String, String> section = new LinkedHashMap<>();
-        List<SysMenu> permissions = menuMapper.selectMenuAll();
+        List<SysMenu> permissions = selectMenuAll(userId);
         if (!CollectionUtils.isEmpty(permissions)) {
             permissions.forEach(menu -> section.put(menu.getUrl(), MessageFormat.format(PREMISSION_STRING, menu.getPerms())));
         }
@@ -138,28 +169,27 @@ public class SysMenuServiceImpl implements ISysMenuService {
      * 对象转菜单树
      *
      * @param menuList     菜单列表
-     * @param isCheck      是否需要选中
      * @param roleMenuList 角色已存在菜单列表
      * @param permsFlag    是否需要显示权限标识
      * @return 菜单树
      */
-    private List<Map<String, Object>> getTrees(List<SysMenu> menuList, boolean isCheck, List<String> roleMenuList,
-                                              boolean permsFlag) {
-        List<Map<String, Object>> trees = new ArrayList<>();
-        menuList.forEach(menu -> {
-            Map<String, Object> deptMap = new HashMap<>();
-            deptMap.put("id", menu.getMenuId());
-            deptMap.put("pId", menu.getParentId());
-            deptMap.put("name", transMenuName(menu, permsFlag));
-            deptMap.put("title", menu.getMenuName());
-            if (isCheck) {
-                deptMap.put("checked", roleMenuList.contains(menu.getMenuId() + menu.getPerms()));
-            } else {
-                deptMap.put("checked", false);
-            }
-            trees.add(deptMap);
-        });
-        return trees;
+    private List<Ztree> initZtree(List<SysMenu> menuList, List<String> roleMenuList, boolean permsFlag){
+        List<Ztree> ztrees = new ArrayList<>();
+        boolean isCheck = CollectionUtil.isNotEmpty(roleMenuList);
+        if(CollectionUtil.isNotEmpty(menuList)){
+            menuList.forEach(menu ->{
+                Ztree ztree = new Ztree();
+                ztree.setId(menu.getMenuId());
+                ztree.setPId(menu.getParentId());
+                ztree.setName(transMenuName(menu, permsFlag));
+                ztree.setTitle(menu.getMenuName());
+                if (isCheck){
+                    ztree.setChecked(roleMenuList.contains(menu.getMenuId() + menu.getPerms()));
+                }
+                ztrees.add(ztree);
+            });
+        }
+        return ztrees;
     }
 
     private String transMenuName(SysMenu menu, boolean permsFlag) {
@@ -246,7 +276,7 @@ public class SysMenuServiceImpl implements ISysMenuService {
     @Override
     public String checkMenuNameUnique(SysMenu menu) {
         SysMenu info = menuMapper.checkMenuNameUnique(menu.getMenuName(), menu.getParentId());
-        if (ObjectUtils.allNotNull(info) && !info.getMenuId().equals(menu.getMenuId())) {
+        if (ObjectUtil.isNotNull(info) && !info.getMenuId().equals(menu.getMenuId())) {
             return UserConstants.MENU_NAME_NOT_UNIQUE;
         }
         return UserConstants.MENU_NAME_UNIQUE;
